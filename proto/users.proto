@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package users;
+
+service UsersService {
+  // Called by the API Gateway. Internally calls OrdersService over its own
+  // mTLS connection, demonstrating gRPC-to-gRPC service chaining.
+  rpc GetUser (GetUserRequest) returns (GetUserResponse);
+}
+
+message GetUserRequest {
+  string id = 1;
+}
+
+message GetUserResponse {
+  string id = 1;
+  string name = 2;
+  string email = 3;
+  repeated string orders = 4;
+  string servedBy = 5; // which service instance answered (for demo/debug)
+}

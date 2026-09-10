@@ -1,0 +1,141 @@
+networks:
+  mtls-net:
+    driver: bridge
+
+volumes:
+  vault-data:
+  gateway-certs:
+  users-certs:
+  orders-certs:
+
+services:
+  # --- Vault: the PKI / root-of-trust for the whole mesh ---
+  vault:
+    image: hashicorp/vault:1.17
+    container_name: vault
+    cap_add:
+      - IPC_LOCK
+    command: ["server", "-config=/vault/config/vault-config.hcl"]
+    ports:
+      - "8200:8200" # Vault UI/API - https://localhost:8200
+    volumes:
+      - ./vault/config:/vault/config:ro
+      - ./vault/tls:/vault/tls:ro
+      - vault-data:/vault/data
+    networks:
+      mtls-net:
+        aliases: [vault]
+    healthcheck:
+      test: ["CMD", "wget", "--no-check-certificate", "-qO-", "https://127.0.0.1:8200/v1/sys/health?standbyok=true"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # --- Vault Agent sidecars: one per service, each with its own AppRole ---
+  vault-agent-gateway:
+    build: ./vault/agent
+    container_name: vault-agent-gateway
+    depends_on:
+      vault:
+        condition: service_healthy
+    volumes:
+      - ./vault/tls/vault-ca.pem:/vault/tls/vault-ca.pem:ro
+      - ./vault/agent/gateway-agent.hcl:/vault/agent/gateway-agent.hcl:ro
+      - ./vault/agent/templates:/vault/agent/templates:ro
+      - ./vault/agent/split-bundle.sh:/vault/agent/split-bundle.sh:ro
+      - ./vault/agent/creds/gateway:/vault/agent/creds/gateway:ro
+      - gateway-certs:/certs
+    command: ["-config=/vault/agent/gateway-agent.hcl"]
+    networks:
+      mtls-net:
+
+  vault-agent-users:
+    build: ./vault/agent
+    container_name: vault-agent-users
+    depends_on:
+      vault:
+        condition: service_healthy
+    volumes:
+      - ./vault/tls/vault-ca.pem:/vault/tls/vault-ca.pem:ro
+      - ./vault/agent/users-service-agent.hcl:/vault/agent/users-service-agent.hcl:ro
+      - ./vault/agent/templates:/vault/agent/templates:ro
+      - ./vault/agent/split-bundle.sh:/vault/agent/split-bundle.sh:ro
+      - ./vault/agent/creds/users-service:/vault/agent/creds/users-service:ro
+      - users-certs:/certs
+    command: ["-config=/vault/agent/users-service-agent.hcl"]
+    networks:
+      mtls-net:
+
+  vault-agent-orders:
+    build: ./vault/agent
+    container_name: vault-agent-orders
+    depends_on:
+      vault:
+        condition: service_healthy
+    volumes:
+      - ./vault/tls/vault-ca.pem:/vault/tls/vault-ca.pem:ro
+      - ./vault/agent/orders-service-agent.hcl:/vault/agent/orders-service-agent.hcl:ro
+      - ./vault/agent/templates:/vault/agent/templates:ro
+      - ./vault/agent/split-bundle.sh:/vault/agent/split-bundle.sh:ro
+      - ./vault/agent/creds/orders-service:/vault/agent/creds/orders-service:ro
+      - orders-certs:/certs
+    command: ["-config=/vault/agent/orders-service-agent.hcl"]
+    networks:
+      mtls-net:
+
+  # --- The three application services ---
+  orders-service:
+    build: ./orders-service
+    container_name: orders-service
+    depends_on:
+      - vault-agent-orders
+    environment:
+      TLS_CA_PATH: /certs/ca-cert.pem
+      TLS_CERT_PATH: /certs/tls-cert.pem
+      TLS_KEY_PATH: /certs/tls-key.pem
+      ORDERS_GRPC_PORT: "50052"
+    volumes:
+      - orders-certs:/certs:ro
+    networks:
+      mtls-net:
+        aliases: [orders-service]
+
+  users-service:
+    build: ./users-service
+    container_name: users-service
+    depends_on:
+      - vault-agent-users
+      - orders-service
+    environment:
+      TLS_CA_PATH: /certs/ca-cert.pem
+      TLS_CERT_PATH: /certs/tls-cert.pem
+      TLS_KEY_PATH: /certs/tls-key.pem
+      USERS_GRPC_PORT: "50051"
+      ORDERS_SERVICE_URL: "orders-service:50052"
+      ORDERS_SERVICE_TLS_SERVER_NAME: "orders-service"
+    volumes:
+      - users-certs:/certs:ro
+    networks:
+      mtls-net:
+        aliases: [users-service]
+
+  gateway:
+    build: ./gateway
+    container_name: gateway
+    depends_on:
+      - vault-agent-gateway
+      - users-service
+    environment:
+      TLS_CA_PATH: /certs/ca-cert.pem
+      TLS_CERT_PATH: /certs/tls-cert.pem
+      TLS_KEY_PATH: /certs/tls-key.pem
+      GATEWAY_PORT: "3000"
+      USERS_SERVICE_URL: "users-service:50051"
+      USERS_SERVICE_TLS_SERVER_NAME: "users-service"
+    ports:
+      - "3000:3000"
+    volumes:
+      - gateway-certs:/certs:ro
+    networks:
+      mtls-net:
+        aliases: [gateway]

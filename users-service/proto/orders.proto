@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package orders;
+
+service OrdersService {
+  rpc GetOrdersForUser (GetOrdersRequest) returns (GetOrdersResponse);
+}
+
+message GetOrdersRequest {
+  string userId = 1;
+}
+
+message GetOrdersResponse {
+  string userId = 1;
+  repeated string orders = 2;
+  string servedBy = 3;
+}

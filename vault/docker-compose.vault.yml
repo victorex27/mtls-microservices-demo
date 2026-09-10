@@ -1,0 +1,88 @@
+# Deployment variant of the Vault stack: uses HOST bind-mounts (under
+# /opt/mtls-demo/certs/<service>/) instead of docker-compose named volumes,
+# because dokku's app containers (managed separately, NOT by this compose
+# file) need to `storage:mount` those same host directories at /certs.
+#
+# Brought up in two phases by scripts/deploy.sh:
+#   1. `docker compose -f vault/docker-compose.vault.yml up -d vault`
+#      then run init-vault.sh / setup-pki.sh / setup-approles.sh
+#   2. `docker compose -f vault/docker-compose.vault.yml up -d`
+#      (now the agents' role_id/secret_id files exist, so they can auth)
+networks:
+  mtls-net:
+    name: internal-grpc-net
+    external: true # created by dokku's network plugin - see scripts/deploy.sh
+
+volumes:
+  vault-data:
+
+services:
+  vault:
+    image: hashicorp/vault:1.17
+    container_name: vault
+    cap_add: [IPC_LOCK]
+    restart: unless-stopped
+    command: ["server", "-config=/vault/config/vault-config.hcl"]
+    ports:
+      - "8200:8200"
+    volumes:
+      - ./config:/vault/config:ro
+      - ./tls:/vault/tls:ro
+      - vault-data:/vault/data
+    networks: [mtls-net]
+    healthcheck:
+      test: ["CMD", "wget", "--no-check-certificate", "-qO-", "https://127.0.0.1:8200/v1/sys/health?standbyok=true"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  vault-agent-gateway:
+    build: ./agent
+    container_name: vault-agent-gateway
+    restart: unless-stopped
+    depends_on:
+      vault:
+        condition: service_healthy
+    volumes:
+      - ./tls/vault-ca.pem:/vault/tls/vault-ca.pem:ro
+      - ./agent/gateway-agent.hcl:/vault/agent/gateway-agent.hcl:ro
+      - ./agent/templates:/vault/agent/templates:ro
+      - ./agent/split-bundle.sh:/vault/agent/split-bundle.sh:ro
+      - ./agent/creds/gateway:/vault/agent/creds/gateway:ro
+      - /opt/mtls-demo/certs/gateway:/certs
+    command: ["-config=/vault/agent/gateway-agent.hcl"]
+    networks: [mtls-net]
+
+  vault-agent-users:
+    build: ./agent
+    container_name: vault-agent-users
+    restart: unless-stopped
+    depends_on:
+      vault:
+        condition: service_healthy
+    volumes:
+      - ./tls/vault-ca.pem:/vault/tls/vault-ca.pem:ro
+      - ./agent/users-service-agent.hcl:/vault/agent/users-service-agent.hcl:ro
+      - ./agent/templates:/vault/agent/templates:ro
+      - ./agent/split-bundle.sh:/vault/agent/split-bundle.sh:ro
+      - ./agent/creds/users-service:/vault/agent/creds/users-service:ro
+      - /opt/mtls-demo/certs/users-service:/certs
+    command: ["-config=/vault/agent/users-service-agent.hcl"]
+    networks: [mtls-net]
+
+  vault-agent-orders:
+    build: ./agent
+    container_name: vault-agent-orders
+    restart: unless-stopped
+    depends_on:
+      vault:
+        condition: service_healthy
+    volumes:
+      - ./tls/vault-ca.pem:/vault/tls/vault-ca.pem:ro
+      - ./agent/orders-service-agent.hcl:/vault/agent/orders-service-agent.hcl:ro
+      - ./agent/templates:/vault/agent/templates:ro
+      - ./agent/split-bundle.sh:/vault/agent/split-bundle.sh:ro
+      - ./agent/creds/orders-service:/vault/agent/creds/orders-service:ro
+      - /opt/mtls-demo/certs/orders-service:/certs
+    command: ["-config=/vault/agent/orders-service-agent.hcl"]
+    networks: [mtls-net]

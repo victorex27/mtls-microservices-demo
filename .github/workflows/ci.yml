@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-typecheck:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [gateway, users-service, orders-service]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install deps
+        working-directory: ${{ matrix.service }}
+        run: npm install --no-audit --no-fund
+
+      - name: Build (tsc)
+        working-directory: ${{ matrix.service }}
+        run: npm run build
+
+  local-mtls-smoke-test:
+    runs-on: ubuntu-latest
+    needs: build-and-typecheck
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Generate local certs
+        run: ./scripts/gen-local-certs.sh
+
+      - name: Run all 3 services + mTLS test suite
+        run: |
+          ./scripts/run-local.sh > run-local.log 2>&1 &
+          sleep 12
+          ./scripts/test-mtls.sh https://localhost:3000
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-local-logs
+          path: run-local.log

@@ -1,0 +1,25 @@
+node_modules/
+dist/
+*.log
+.env
+
+# Vault runtime secrets - NEVER commit these
+vault/tls/
+vault/secrets/
+vault/agent/creds/*/role_id
+vault/agent/creds/*/secret_id
+vault/data/
+
+# ad-hoc openssl certs from scripts/gen-local-certs.sh
+certs/local/
+
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.backup
+terraform/.terraform.lock.hcl
+terraform/terraform.tfvars
+terraform/*.pem
+terraform/*.pub
+
+.DS_Store
