@@ -277,8 +277,11 @@ jobs:
           echo "Confirmed: a new certificate was issued and written to disk."
 
           # and the service should still be answering mTLS requests post-rotation,
-          # proving the app picked up the fresh cert (cert-watcher.ts -> restart)
-          ./scripts/test-mtls.sh https://localhost:3000
+          # proving the app picked up the fresh cert (cert-watcher.ts -> restart).
+          # Same api-gateway/--resolve requirement as every other call to this
+          # Vault-issued gateway in this job - its cert SAN is "api-gateway",
+          # never "localhost".
+          ./scripts/test-mtls.sh https://api-gateway:3000 127.0.0.1
 
       - name: Dump logs on failure
         if: failure()
