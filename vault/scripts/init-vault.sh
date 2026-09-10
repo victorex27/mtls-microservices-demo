@@ -18,12 +18,18 @@ export VAULT_CACERT="${VAULT_CACERT:-$(pwd)/tls/vault-ca.pem}"
 
 mkdir -p secrets
 
-if vault status >/dev/null 2>&1; then
-  INITIALIZED=$(vault status -format=json | jq -r '.initialized')
-else
-  # vault status exits non-zero when sealed; check the json anyway
-  INITIALIZED=$(vault status -format=json 2>/dev/null | jq -r '.initialized' || echo "false")
-fi
+# `vault status` exits non-zero whenever Vault is sealed or uninitialized -
+# that's normal, expected, and NOT an error we want set -e to act on. It
+# still prints valid JSON to stdout in that case, so capture stdout with
+# its exit code neutralized (`|| true`), then hand that string to jq as a
+# SEPARATE command (not piped straight from `vault status`) so pipefail
+# has nothing to trip on. Piping `vault status | jq ... || echo fallback`
+# looks equivalent but isn't: if jq itself exits 0, its real output is
+# already captured, and pipefail still fails the pipeline because vault
+# status exited non-zero - so `|| echo fallback` APPENDS a second line
+# instead of replacing anything, corrupting the value.
+STATUS_JSON=$(vault status -format=json 2>/dev/null || true)
+INITIALIZED=$(jq -r '.initialized // false' <<<"$STATUS_JSON")
 
 if [ "$INITIALIZED" != "true" ]; then
   echo "Initializing Vault (5 key shares, threshold 3)..."
@@ -41,10 +47,10 @@ if [ ! -f secrets/vault-init.json ]; then
   exit 1
 fi
 
-# vault status exits 2 when sealed - which it always is right after
-# 'operator init'. Under set -euo pipefail that would kill the script here
-# before the unseal logic below ever runs, so fall back like INITIALIZED does.
-SEALED=$(vault status -format=json 2>/dev/null | jq -r '.sealed' || echo "true")
+# Same reasoning as STATUS_JSON above - re-check now rather than reuse the
+# pre-init snapshot, since operator init above changes sealed state.
+STATUS_JSON=$(vault status -format=json 2>/dev/null || true)
+SEALED=$(jq -r '.sealed // true' <<<"$STATUS_JSON")
 if [ "$SEALED" = "true" ]; then
   echo "Unsealing Vault with 3 of 5 key shares..."
   jq -r '.unseal_keys_b64[0]' secrets/vault-init.json | xargs vault operator unseal >/dev/null
