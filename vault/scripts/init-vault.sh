@@ -41,7 +41,10 @@ if [ ! -f secrets/vault-init.json ]; then
   exit 1
 fi
 
-SEALED=$(vault status -format=json | jq -r '.sealed')
+# vault status exits 2 when sealed - which it always is right after
+# 'operator init'. Under set -euo pipefail that would kill the script here
+# before the unseal logic below ever runs, so fall back like INITIALIZED does.
+SEALED=$(vault status -format=json 2>/dev/null | jq -r '.sealed' || echo "true")
 if [ "$SEALED" = "true" ]; then
   echo "Unsealing Vault with 3 of 5 key shares..."
   jq -r '.unseal_keys_b64[0]' secrets/vault-init.json | xargs vault operator unseal >/dev/null
