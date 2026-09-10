@@ -206,7 +206,7 @@ jobs:
           # curl sends set to "api-gateway" while still routing to
           # 127.0.0.1, via --resolve - the same trick docs/DEPLOYMENT.md
           # documents for hitting the real deployed instance by IP.
-          for i in $(seq 1 150); do
+          for i in $(seq 1 60); do
             code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 3 \
               --resolve api-gateway:3000:127.0.0.1 \
               --cert certs/local/test-client/tls-cert.pem \
@@ -214,36 +214,8 @@ jobs:
               --cacert certs/local/test-client/ca-cert.pem \
               https://api-gateway:3000/healthz || echo "000")
             [ "$code" = "200" ] && { echo "gateway ready after ${i}s"; break; }
-            if [ $((i % 30)) -eq 0 ]; then
-              echo "=== still waiting after ${i}s (last curl result: $code) ==="
-              echo "--- gateway container state ---"
-              docker compose ps gateway --format '{{.State}}'
-              echo "--- verbose curl (host -> published port 3000) ---"
-              curl -v --max-time 3 --resolve api-gateway:3000:127.0.0.1 \
-                --cert certs/local/test-client/tls-cert.pem \
-                --key certs/local/test-client/tls-key.pem \
-                --cacert certs/local/test-client/ca-cert.pem \
-                https://api-gateway:3000/healthz 2>&1 || true
-              echo "--- same request from INSIDE the gateway container (bypasses host port-forwarding) ---"
-              docker compose exec -T gateway node -e "
-                const https = require('https');
-                const fs = require('fs');
-                const req = https.request({
-                  host: '127.0.0.1', port: 3000, path: '/healthz', method: 'GET',
-                  key: fs.readFileSync(process.env.TLS_KEY_PATH),
-                  cert: fs.readFileSync(process.env.TLS_CERT_PATH),
-                  ca: fs.readFileSync(process.env.TLS_CA_PATH),
-                  timeout: 3000,
-                }, (res) => { console.log('in-container status:', res.statusCode); res.resume(); });
-                req.on('error', (e) => console.log('in-container error:', e.message));
-                req.on('timeout', () => { console.log('in-container timeout'); req.destroy(); });
-                req.end();
-              " 2>&1 || true
-              echo "--- gateway logs so far ---"
-              docker compose logs --no-color gateway
-            fi
             sleep 1
-            [ "$i" -eq 150 ] && { echo "gateway never became ready after 150s"; docker compose logs gateway; exit 1; }
+            [ "$i" -eq 60 ] && { echo "gateway never became ready after 60s"; docker compose logs gateway; exit 1; }
           done
 
       - name: Run mTLS test suite against the Vault-issued certs
