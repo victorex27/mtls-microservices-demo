@@ -21,9 +21,16 @@ mkdir -p "$OUT_DIR"
 vault write -format=json pki_int/issue/test-client-role \
   common_name="test-client" ttl="1h" > /tmp/test-client-bundle.json
 
-jq -r '.data.certificate + "\n" + .data.issuing_ca' /tmp/test-client-bundle.json > "$OUT_DIR/tls-cert.pem"
+# Use the full ca_chain (issuing intermediate + root), not just
+# issuing_ca (the bare intermediate) - see the matching comment in
+# vault/agent/split-bundle.sh for why a CA file with only the
+# intermediate reproducibly breaks Node's peer-cert verification even
+# though curl/OpenSSL's CLI tolerates it fine.
+CHAIN_FILTER='(.data.ca_chain // [.data.issuing_ca]) | join("\n")'
+
+jq -r ".data.certificate + \"\n\" + ($CHAIN_FILTER)" /tmp/test-client-bundle.json > "$OUT_DIR/tls-cert.pem"
 jq -r '.data.private_key' /tmp/test-client-bundle.json > "$OUT_DIR/tls-key.pem"
-jq -r '.data.issuing_ca' /tmp/test-client-bundle.json > "$OUT_DIR/ca-cert.pem"
+jq -r "$CHAIN_FILTER" /tmp/test-client-bundle.json > "$OUT_DIR/ca-cert.pem"
 chmod 600 "$OUT_DIR/tls-key.pem"
 rm -f /tmp/test-client-bundle.json
 

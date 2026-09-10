@@ -8,9 +8,20 @@ set -eu
 BUNDLE="/certs/bundle.json"
 OUT_DIR="/certs"
 
-jq -r '.certificate + "\n" + .issuing_ca' "$BUNDLE" > "$OUT_DIR/tls-cert.pem.tmp"
+# Use Vault's full ca_chain (issuing intermediate + root), not just
+# issuing_ca (the bare intermediate). Node's TLS verification (unlike
+# curl/OpenSSL's CLI trust-store handling, which is more lenient about
+# trusting a non-self-signed cert placed directly in the CA file) needs a
+# complete chain up to a self-signed root to reliably validate a peer's
+# cert - a CA file containing only the intermediate reproducibly fails
+# Node's peer-certificate verification with "unable to get issuer
+# certificate", even though the intermediate IS in fact the correct/only
+# issuer. ca_chain falls back to [issuing_ca] if Vault ever omits it.
+CHAIN_FILTER='(.ca_chain // [.issuing_ca]) | join("\n")'
+
+jq -r ".certificate + \"\n\" + ($CHAIN_FILTER)" "$BUNDLE" > "$OUT_DIR/tls-cert.pem.tmp"
 jq -r '.private_key' "$BUNDLE" > "$OUT_DIR/tls-key.pem.tmp"
-jq -r '.issuing_ca' "$BUNDLE" > "$OUT_DIR/ca-cert.pem.tmp"
+jq -r "$CHAIN_FILTER" "$BUNDLE" > "$OUT_DIR/ca-cert.pem.tmp"
 
 mv "$OUT_DIR/tls-cert.pem.tmp" "$OUT_DIR/tls-cert.pem"
 mv "$OUT_DIR/tls-key.pem.tmp" "$OUT_DIR/tls-key.pem"
