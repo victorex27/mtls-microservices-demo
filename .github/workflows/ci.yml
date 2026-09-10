@@ -39,11 +39,31 @@ jobs:
       - name: Generate local certs
         run: ./scripts/gen-local-certs.sh
 
-      - name: Run all 3 services + mTLS test suite
+      - name: Start all 3 services
         run: |
-          ./scripts/run-local.sh > run-local.log 2>&1 &
-          sleep 12
-          ./scripts/test-mtls.sh https://localhost:3000
+          nohup ./scripts/run-local.sh > run-local.log 2>&1 &
+          disown
+
+      - name: Wait for gateway to be reachable (mTLS handshake, not just TCP)
+        run: |
+          for i in $(seq 1 60); do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 3 \
+              --cert certs/local/test-client/tls-cert.pem \
+              --key certs/local/test-client/tls-key.pem \
+              --cacert certs/local/test-client/ca-cert.pem \
+              https://localhost:3000/healthz || echo "000")
+            if [ "$code" = "200" ]; then
+              echo "gateway ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "gateway never became ready after 60s - dumping logs:" >&2
+          cat run-local.log >&2
+          exit 1
+
+      - name: Run mTLS test suite
+        run: ./scripts/test-mtls.sh https://localhost:3000
 
       - name: Upload logs on failure
         if: failure()
