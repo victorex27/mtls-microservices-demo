@@ -65,4 +65,29 @@ export VAULT_TOKEN=$(jq -r '.root_token' secrets/vault-init.json)
 echo "$VAULT_TOKEN" > secrets/root-token.txt
 chmod 600 secrets/root-token.txt
 echo "Root token written to vault/secrets/root-token.txt (gitignored)."
+
+# `sealed: false` doesn't mean Vault is ready to serve writes yet. With Raft
+# storage, unsealing just lets this node join/complete its own single-node
+# leader election - there's a real (if usually sub-second) gap between
+# "unsealed" and "elected itself active node". Hit it too early and you get
+# a real, reproducible failure, not a flake in the "eventually consistent"
+# sense - every mounts/pki write in that gap fails with:
+#   Code: 500 * local node not active but active cluster node not found
+# So actively wait for the node to report itself as the Raft leader before
+# handing control to setup-pki.sh, instead of assuming unsealed == ready.
+echo "Waiting for Vault to become the active (leader) node..."
+for i in $(seq 1 30); do
+  IS_SELF=$(vault read -format=json sys/leader 2>/dev/null | jq -r '.data.is_self // false')
+  if [ "$IS_SELF" = "true" ]; then
+    echo "Vault is the active node (after ~${i}s)."
+    break
+  fi
+  sleep 1
+  if [ "$i" -eq 30 ]; then
+    echo "Vault did not become the active node within 30s." >&2
+    vault read sys/leader >&2 || true
+    exit 1
+  fi
+done
+
 echo "Next: run ./scripts/setup-pki.sh"
