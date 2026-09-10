@@ -102,14 +102,39 @@ jobs:
         run: |
           export VAULT_ADDR=https://127.0.0.1:8200
           export VAULT_CACERT="$(pwd)/vault/tls/vault-ca.pem"
+          attempts=0
+          max_container_restarts=3
+          restarts=0
           for i in $(seq 1 60); do
             if curl -sk --cacert "$VAULT_CACERT" "$VAULT_ADDR/v1/sys/health?standbyok=true" >/dev/null 2>&1; then
               echo "vault healthy after ~$((i*2))s"
-              break
+              exit 0
             fi
+
+            # Don't just spin against a dead container for 2 minutes: if it
+            # already exited, print why immediately and, unless we've
+            # already retried a few times (a real bug, not a transient
+            # port-publish race), try bringing it back up.
+            state=$(docker compose ps vault --format '{{.State}}' 2>/dev/null || echo "unknown")
+            if [ "$state" = "exited" ]; then
+              echo "--- vault container exited (attempt $((restarts+1))/${max_container_restarts}); logs: ---"
+              docker compose logs --no-color vault
+              restarts=$((restarts + 1))
+              if [ "$restarts" -gt "$max_container_restarts" ]; then
+                echo "::error::vault container kept exiting after ${max_container_restarts} restarts - see logs above"
+                exit 1
+              fi
+              echo "--- retrying: docker compose up -d vault ---"
+              docker compose up -d vault
+              sleep 3
+              continue
+            fi
+
             sleep 2
-            [ "$i" -eq 60 ] && { echo "vault never became healthy"; docker compose logs vault; exit 1; }
           done
+          echo "::error::vault never became healthy within 120s (last state: $state)"
+          docker compose logs --no-color vault
+          exit 1
 
       - name: Initialize + unseal + configure PKI + AppRoles
         run: |
