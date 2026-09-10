@@ -175,7 +175,15 @@ jobs:
           # curl sends set to "api-gateway" while still routing to
           # 127.0.0.1, via --resolve - the same trick docs/DEPLOYMENT.md
           # documents for hitting the real deployed instance by IP.
-          for i in $(seq 1 60); do
+          #
+          # 60x1s wasn't enough headroom on a loaded CI runner: "docker
+          # compose up -d --build" (previous step) builds all 3 Node images
+          # from scratch, and gateway's own entrypoint.sh separately waits
+          # up to 60s for its Vault Agent to render certs before even
+          # starting Nest - a confirmed real run needed the full ~60s just
+          # to boot, past this loop's old deadline. 150x1s gives real
+          # margin instead of quietly depending on a fast runner.
+          for i in $(seq 1 150); do
             code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 3 \
               --resolve api-gateway:3000:127.0.0.1 \
               --cert certs/local/test-client/tls-cert.pem \
@@ -183,8 +191,12 @@ jobs:
               --cacert certs/local/test-client/ca-cert.pem \
               https://api-gateway:3000/healthz || echo "000")
             [ "$code" = "200" ] && { echo "gateway ready after ${i}s"; break; }
+            if [ $((i % 15)) -eq 0 ]; then
+              echo "still waiting after ${i}s (last curl result: $code) - gateway container state:"
+              docker compose ps gateway --format '{{.State}}'
+            fi
             sleep 1
-            [ "$i" -eq 60 ] && { echo "gateway never became ready"; docker compose logs gateway; exit 1; }
+            [ "$i" -eq 150 ] && { echo "gateway never became ready after 150s"; docker compose logs gateway; exit 1; }
           done
 
       - name: Run mTLS test suite against the Vault-issued certs
