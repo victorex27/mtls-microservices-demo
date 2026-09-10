@@ -18,9 +18,14 @@ scripts underneath.
 
 ## Option A: GitHub Actions (recommended)
 
-1. In your repo: **Settings → Secrets and variables → Actions**, add:
-   - `AWS_ACCESS_KEY_ID`
-   - `AWS_SECRET_ACCESS_KEY`
+1. In your repo: **Settings → Secrets and variables → Actions**:
+   - Under **Secrets**, add `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
+   - Under **Variables** (not Secrets - it's not sensitive), add
+     `SSH_ALLOWED_CIDR` set to your own IP as a /32, e.g. `203.0.113.4/32`
+     (find yours with `curl -s https://checkip.amazonaws.com`). This is
+     required - `terraform/variables.tf` has no default for it on purpose,
+     so the workflow fails fast with a clear error if you skip this rather
+     than silently opening SSH and Vault's UI to the whole internet.
 2. **Actions → Deploy to EC2 → Run workflow**, action = `apply`.
 
 This runs `.github/workflows/deploy.yml`, which:

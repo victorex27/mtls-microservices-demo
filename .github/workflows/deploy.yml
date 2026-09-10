@@ -26,6 +26,13 @@ jobs:
 
       - uses: hashicorp/setup-terraform@v3
 
+      - name: Require SSH_ALLOWED_CIDR to be set
+        run: |
+          if [ -z "${{ vars.SSH_ALLOWED_CIDR }}" ]; then
+            echo "::error::Repo variable SSH_ALLOWED_CIDR is not set."                  "terraform/variables.tf has no default for ssh_allowed_cidr"                  "on purpose - go to Settings > Secrets and variables > Actions > Variables"                  "and add SSH_ALLOWED_CIDR (e.g. 203.0.113.4/32 - find yours with"                  "'curl -s https://checkip.amazonaws.com'). Use 0.0.0.0/0 only if you"                  "really mean to leave SSH + Vault's UI open to the internet."
+            exit 1
+          fi
+
       - name: Terraform Init
         run: terraform init
 
@@ -35,6 +42,7 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          TF_VAR_ssh_allowed_cidr: ${{ vars.SSH_ALLOWED_CIDR }}
 
       - name: Terraform Destroy
         if: github.event.inputs.action == 'destroy'
@@ -42,6 +50,7 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          TF_VAR_ssh_allowed_cidr: ${{ vars.SSH_ALLOWED_CIDR }}
 
       - name: Export outputs
         id: tf_outputs

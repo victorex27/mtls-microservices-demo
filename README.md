@@ -70,23 +70,32 @@ restart and pick up the fresh cert (see [docs/VAULT.md](docs/VAULT.md) for
 exactly how). Same application code, two different ways the certs get
 onto disk.
 
-## Status / what's genuinely verified vs. documented-but-untested
+## Status / what's actually verified, and where
 
-Built and verified in this environment:
-- All 3 services compile and run; the full mTLS chain (positive and
-  negative cases) passes `scripts/test-mtls.sh` against the local
-  openssl-cert path.
-- The Vault Agent JSON-bundle → split-into-PEM-files logic was verified
-  standalone (the `jq` parsing).
+Two CI jobs run on every push (`.github/workflows/ci.yml`), both against
+real running services, not mocks:
 
-Written carefully but **not executed** in this environment, because it
-required a Docker registry (`hashicorp/vault` image) and AWS/Terraform
-network access this sandbox's egress policy blocks: the full
-`docker-compose.yml`/`vault/docker-compose.vault.yml` Vault stack, and the
-Terraform + dokku deployment. Run `docs/LOCAL_TESTING.md` Path B and
-`docs/DEPLOYMENT.md` yourself (or via the GitHub Actions workflow) to
-exercise those - and please open an issue/fix a PR if something doesn't
-line up, since it hasn't had a real run yet.
+- **`local-mtls-smoke-test`** - the openssl-cert path (no Vault): builds
+  and runs all 3 services, then runs the full positive/negative mTLS test
+  suite against them.
+- **`vault-stack-smoke-test`** - the full production-style path: installs
+  the real Vault CLI, brings up a real Vault server (Raft storage) via
+  Docker Compose, initializes/unseals it, configures the two-tier PKI +
+  AppRoles, brings up all 3 Vault Agent sidecars (which authenticate and
+  issue real certs), runs the mTLS test suite against those Vault-issued
+  certs, then **forces a rotation and asserts a genuinely new certificate
+  was written to disk and the service still answers correctly afterward**.
+  This is the thing that couldn't be run inside my own sandbox (its
+  network policy blocks Docker Hub and HashiCorp's release servers) - it's
+  now verified for real, on every push, on GitHub's infrastructure.
+
+Not yet run end-to-end anywhere: the actual Terraform + dokku deployment
+to AWS (`.github/workflows/deploy.yml`), since that needs your AWS
+credentials as repo secrets. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+If something in the dokku/EC2 path needs a fix once you run it, that's
+expected for a first real run against a fresh AWS account - open an issue
+or push a fix, the CI jobs above already cover the parts most likely to
+have subtle bugs (the mTLS/PKI logic itself).
 
 ## License
 

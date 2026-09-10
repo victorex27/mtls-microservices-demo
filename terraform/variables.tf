@@ -17,9 +17,21 @@ variable "instance_type" {
 }
 
 variable "ssh_allowed_cidr" {
-  description = "CIDR allowed to SSH into the instance. Restrict this to your own IP in production use."
-  type        = string
-  default     = "0.0.0.0/0"
+  description = <<-EOT
+    CIDR allowed to reach SSH (22) and Vault's UI/API (8200) on the
+    instance. Deliberately has NO default - this repo does not ship a
+    "0.0.0.0/0 by default, tighten it later" posture. Set it explicitly,
+    e.g. "203.0.113.4/32" (find your IP: curl -s https://checkip.amazonaws.com).
+    If you genuinely need it open to the world (rare - e.g. SSH from a
+    dynamic IP with no VPN), set "0.0.0.0/0" explicitly so that's a decision
+    you made, not a default you inherited.
+  EOT
+  type = string
+
+  validation {
+    condition     = can(cidrhost(var.ssh_allowed_cidr, 0))
+    error_message = "ssh_allowed_cidr must be a valid CIDR, e.g. \"203.0.113.4/32\"."
+  }
 }
 
 variable "dokku_vhost_enable" {
