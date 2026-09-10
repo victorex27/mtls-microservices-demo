@@ -32,7 +32,7 @@ services:
     depends_on:
       vault-data-init:
         condition: service_completed_successfully
-    command: ["server", "-config=/vault/config/vault-config.hcl"]
+    command: ["server"]  # official entrypoint already adds -config=/vault/config (the dir); an extra explicit -config here double-loads vault-config.hcl and double-binds the listener
     ports:
       - "8200:8200" # Vault UI/API - https://localhost:8200
     volumes:
