@@ -5,6 +5,7 @@ dist/
 
 # Vault runtime secrets - NEVER commit these
 vault/tls/
+vault/tls-private/
 vault/secrets/
 vault/agent/creds/*/role_id
 vault/agent/creds/*/secret_id
