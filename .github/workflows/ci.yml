@@ -168,19 +168,27 @@ jobs:
 
       - name: Wait for gateway to be reachable
         run: |
+          # The gateway's Vault-issued cert has SAN=api-gateway only (see
+          # gateway-role's allowed_domains in vault/scripts/setup-pki.sh) -
+          # unlike the openssl-generated local-mtls-smoke-test certs, it does
+          # NOT include "localhost". So we must connect with the SNI/Host
+          # curl sends set to "api-gateway" while still routing to
+          # 127.0.0.1, via --resolve - the same trick docs/DEPLOYMENT.md
+          # documents for hitting the real deployed instance by IP.
           for i in $(seq 1 60); do
             code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 3 \
+              --resolve api-gateway:3000:127.0.0.1 \
               --cert certs/local/test-client/tls-cert.pem \
               --key certs/local/test-client/tls-key.pem \
               --cacert certs/local/test-client/ca-cert.pem \
-              https://localhost:3000/healthz || echo "000")
+              https://api-gateway:3000/healthz || echo "000")
             [ "$code" = "200" ] && { echo "gateway ready after ${i}s"; break; }
             sleep 1
             [ "$i" -eq 60 ] && { echo "gateway never became ready"; docker compose logs gateway; exit 1; }
           done
 
       - name: Run mTLS test suite against the Vault-issued certs
-        run: ./scripts/test-mtls.sh https://localhost:3000
+        run: ./scripts/test-mtls.sh https://api-gateway:3000 127.0.0.1
 
       - name: Prove rotation actually works
         run: |
