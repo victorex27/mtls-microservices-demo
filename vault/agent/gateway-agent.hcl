@@ -26,8 +26,4 @@ template {
   source      = "/vault/agent/templates/gateway-bundle.json.tpl"
   destination = "/certs/bundle.json"
   command     = "/vault/agent/split-bundle.sh"
-  # Re-render (and thus re-issue) well before the 24h cert TTL expires.
-  # Vault Agent's own lease-renewal logic re-runs the template as leases
-  # approach their TTL; this backoff just governs retry-on-error cadence.
-  error_backoff = "30s"
 }
