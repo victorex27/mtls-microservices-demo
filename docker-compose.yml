@@ -9,12 +9,29 @@ volumes:
   orders-certs:
 
 services:
+  # The hashicorp/vault image runs its server process as the unprivileged
+  # `vault` user, but a fresh docker-compose named volume is root-owned by
+  # default - Vault then fails at startup with "permission denied" trying
+  # to open its Raft bolt file. This one-shot init container runs as root
+  # (overriding the image's default user) purely to fix that ownership
+  # before `vault` starts; `service_completed_successfully` makes it a
+  # real dependency, not a race.
+  vault-data-init:
+    image: hashicorp/vault:1.17
+    user: "0:0"
+    entrypoint: ["sh", "-c", "chown -R vault:vault /vault/data"]
+    volumes:
+      - vault-data:/vault/data
+
   # --- Vault: the PKI / root-of-trust for the whole mesh ---
   vault:
     image: hashicorp/vault:1.17
     container_name: vault
     cap_add:
       - IPC_LOCK
+    depends_on:
+      vault-data-init:
+        condition: service_completed_successfully
     command: ["server", "-config=/vault/config/vault-config.hcl"]
     ports:
       - "8200:8200" # Vault UI/API - https://localhost:8200

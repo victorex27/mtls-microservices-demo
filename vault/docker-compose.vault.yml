@@ -17,11 +17,24 @@ volumes:
   vault-data:
 
 services:
+  # See docker-compose.yml (local variant) for why this exists: a fresh
+  # named volume is root-owned, but Vault's server process runs as the
+  # unprivileged `vault` user and needs to write its Raft bolt file there.
+  vault-data-init:
+    image: hashicorp/vault:1.17
+    user: "0:0"
+    entrypoint: ["sh", "-c", "chown -R vault:vault /vault/data"]
+    volumes:
+      - vault-data:/vault/data
+
   vault:
     image: hashicorp/vault:1.17
     container_name: vault
     cap_add: [IPC_LOCK]
     restart: unless-stopped
+    depends_on:
+      vault-data-init:
+        condition: service_completed_successfully
     command: ["server", "-config=/vault/config/vault-config.hcl"]
     ports:
       - "8200:8200"
