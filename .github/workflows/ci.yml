@@ -163,6 +163,37 @@ jobs:
             fi
           done
 
+      - name: Wait for users-service and orders-service gRPC listeners to be up
+        run: |
+          # Cert files existing (previous step) only proves the Vault Agent
+          # sidecar has rendered them - it says nothing about whether the
+          # Node process inside that container has actually finished
+          # starting and bound its gRPC port yet. Real failure seen without
+          # this: users-service received a request from the gateway before
+          # orders-service had bound 50052, and the whole call chain died
+          # with a plain "ECONNREFUSED" - not a cert/TLS problem at all,
+          # just an ordinary "callee isn't listening yet" startup race.
+          check_port() {
+            local service=$1 port=$2
+            for i in $(seq 1 30); do
+              if docker compose exec -T "$service" node -e "
+                const net = require('net');
+                const s = net.connect({host: '127.0.0.1', port: $port}, () => { s.destroy(); process.exit(0); });
+                s.on('error', () => process.exit(1));
+                s.setTimeout(1000, () => { s.destroy(); process.exit(1); });
+              " >/dev/null 2>&1; then
+                echo "$service:$port accepting connections after ~${i}s"
+                return 0
+              fi
+              sleep 1
+            done
+            echo "::error::$service:$port never started accepting connections within 30s"
+            docker compose logs "$service"
+            return 1
+          }
+          check_port orders-service 50052
+          check_port users-service 50051
+
       - name: Issue a test-client cert from Vault
         run: (cd vault && ./scripts/issue-test-client-cert.sh)
 
