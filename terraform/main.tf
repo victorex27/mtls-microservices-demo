@@ -13,18 +13,16 @@ data "aws_subnets" "default" {
   }
 }
 
-data "aws_ami" "ubuntu" {
-  most_recent = true
-  owners      = ["099720109477"] # Canonical
-
-  filter {
-    name   = "name"
-    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-jammy-22.04-amd64-server-*"]
-  }
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
+# Resolved via Canonical's own officially-published SSM parameter rather
+# than an aws_ami name-pattern filter: a wildcard filter over Canonical's
+# AMI names is fragile against renames/format drift and reproducibly
+# returned zero results in a real run ("Your query returned no results")
+# with no way to tell whether that meant a stale filter, a region gap, or
+# something else. This SSM path is the exact mechanism Canonical documents
+# for automated AMI discovery and always resolves to a real, current AMI
+# id for 22.04 in any region that has one.
+data "aws_ssm_parameter" "ubuntu_ami" {
+  name = "/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp3/ami-id"
 }
 
 # Generated here (rather than requiring a pre-existing AWS key pair) so
@@ -60,7 +58,7 @@ resource "aws_security_group" "app" {
   }
 
   ingress {
-    description = "HTTP (dokku app routing / Let's Encrypt HTTP-01, if used)"
+    description = "HTTP (dokku app routing / ACME HTTP-01 challenge, if used)"
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
@@ -107,7 +105,7 @@ resource "aws_security_group" "app" {
 }
 
 resource "aws_instance" "app" {
-  ami                    = data.aws_ami.ubuntu.id
+  ami                    = data.aws_ssm_parameter.ubuntu_ami.value
   instance_type          = var.instance_type
   key_name               = aws_key_pair.deploy_key.key_name
   subnet_id              = data.aws_subnets.default.ids[0]
